@@ -154,7 +154,6 @@ def hist_to_csv(mat_df,estep,output_location = ''):
                 os.makedirs(out_direct)
 
             nam = 'IBEX_lo_o%04d%s_E%d_HB_and_DE_report.csv'%(int(orb_num),('a' if orb_num-int(orb_num)==0 else 'b'),estep)
-            # print(nam)
             cols = [['bin_center(NEP)'],['center_time(GPS)'],['center_time(YYYY-MM-DD DD:HH:MM:SS)'],
                                 ['HB_counts'],['bin_center(NEP)'],['DE_counts'],['Orbit:%.1f'%orb_num]]
             for start_t,end_t,dt_t,t_t,hist,tof in zip(orb['eph']['start_time'].values,
@@ -270,13 +269,13 @@ def mat_df_test(mat_df,labels = None):
                         'end_time - start_time':mat_hist['end_time']-mat_hist['start_time'],
                         'diff(t_mean)': np.diff(mat_hist['t_mean']),
                         'diff(t)': np.diff(mat_hist['time']),
-                        'time-start_time':mat_hist['time'].values-mat_hist['start_time'],
-                        'time-end_time':mat_hist['time'].values-mat_hist['end_time'],
+                        # 'time-start_time':mat_hist['time'].values-mat_hist['start_time'],
+                        # 'time-end_time':mat_hist['time'].values-mat_hist['end_time'],
                         't_mean-start_time':mat_hist['t_mean'].values-mat_hist['start_time'],
                         't_mean-end_time':mat_hist['t_mean'].values-mat_hist['end_time'],
                         'dt':mat_hist['dt'][~np.isnan(mat_hist['dt'])],
                         'time-t_mean':mat_hist['time']-mat_hist['t_mean'],
-                        'dt_mid':abs(1376-mat_hist['dt'])
+                        # 'dt_mid':abs(1376-mat_hist['dt'])
                       }
 
         loc_ref = 0

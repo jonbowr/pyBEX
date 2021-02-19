@@ -70,9 +70,6 @@ def tof_expected(ke_in=np.array(17500),species = 'H',
                     toff_offset = tof3_expected/2
             d_out[lab]=val/v_t[lab]+toff_offset
         d_out['tof3']=np.array([tof3_expected]*len(ke))
-        # for nam,val in d_out.items():
-        #     print(nam)
-        #     print(len(val))
         dfs.append(pd.DataFrame(d_out))
     dfs = pd.concat(dfs, ignore_index = True)
     dfs.columns = pd.MultiIndex.from_arrays([list(dfs.keys().values),units],names  =['','Units']) 
