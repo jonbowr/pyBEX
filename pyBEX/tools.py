@@ -13,11 +13,7 @@ def import_good_times(fil):
                       comment = '#',header = None)
 
     head_out = []
-    # start_nams = ['start','begin']
-    # stop_nams = ['stop','end']
-    # time_nams = ['time','gps']
     for h in header:
-        # if start_nams 
         head_out.append(h.replace('begin_GPS','Start Time').replace('end_GPS','Stop Time').strip().strip('/arc'))
     arr.columns = head_out
     if type(arr['orbit'].values[0])==str:
@@ -35,15 +31,12 @@ def import_good_times(fil):
 
 def get_headder(fil):
     hct = 0
-    # lines = []
     head = []
     with open(fil) as l:
         for ll in l.readlines():
 
             if ll.strip():
                 if '#' in ll:    
-                    # print(ll) 
-                    # print(hct)
                     hs = ll.strip().strip('#').strip(':')
                     if hs:
                         head = []
@@ -54,7 +47,6 @@ def get_headder(fil):
                     break
                 
                 hct+=1
-    #                 lines.append(np.fromstring(ll.split('#')[0].strip().replace('  ',' '),sep = ' '))
     if head and 'met' in head[0].lower():
         head[0]= 'time'
     return(head)
@@ -75,14 +67,7 @@ def load_df(path,estep=None,dtype = '.txt',head = None,
     else:
         ftype = "*%s%s"%(str(estep),dtype)
         fils = glob.glob(path + ftype)
-    # if head == 'auto':
-    #     for head_loc in glob.glob(path + ftype):
-    #         try:
-    #             head = get_headder(head_loc)
-    #             print(head)
-    #             break
-    #         except(UnboundLocalError):
-    #             pass
+
 
     from ipywidgets import IntProgress,Output
     from IPython.display import display
@@ -115,15 +100,6 @@ def load_df(path,estep=None,dtype = '.txt',head = None,
                                 comment = '#',names = (cols if cols else None),
                                     usecols = usecols)
 
-                # if head == 'auto' and not usecols:
-                #     l.columns = get_headder(f)
-                # elif head=='auto' and usecols:
-                #     l.columns = list(get_headder(f)[c] for c in usecols)
-                # elif type(head)==list and usecols:
-                #     l.columns = list(head[c] for c in usecols)
-                # elif head:
-                #     l.columns = head
-
                 # Define exception to convert 'en' column to 'ch'
                 if 'en' in l:
                     # ch = np.zeros(len(l['en'])).astype(int)
@@ -137,16 +113,12 @@ def load_df(path,estep=None,dtype = '.txt',head = None,
                     l.insert(1,nam,val)
                 if not l.empty:
                     if calc_nep == True:
-                        # nep = 360*(l['phase'].values+.5)-3
-                        # nep[nep>360] = nep[nep>360]-360
                         l.insert(4,'nep',phase_to_nep(l['phase'].values))
                     li.append(l)
                 else:
                     print(cols)
                     print(head)
             except(pd.errors.EmptyDataError):
-                # print(f)
-                # break
                 if fail == 0:
                     out.append_stdout('E%s Import Failed [EmptyDataError] on Orbits: \n'%f.split('.')[0][-1])
                 out.append_stdout('%s,'%orbit_arc)
@@ -154,9 +126,6 @@ def load_df(path,estep=None,dtype = '.txt',head = None,
 
                 orbit_fails+='%s, '%orbit_arc
         lb.value +=1
-    # if orbit_fails:
-    #     print('E%d Import Failed [EmptyDataError] on Orbits:'%int(f.split('.')[0][-1]))
-    #     print(orbit_fails)
 
     lb.close()
     return((pd.concat(li) if len(li)>= 1 else pd.DataFrame()))
@@ -164,7 +133,7 @@ def load_df(path,estep=None,dtype = '.txt',head = None,
 
 def mask_good_times(ds,good_times,apply_nep =False,include_no_gt=False,return_mask = False,nep_start_max = np.inf,nep_stop_min = -np.inf):
     gt =good_times.loc[((good_times['Start Time']>min(ds['time'])) &\
-                             (good_times['Stop Time']<max(ds['time'])))]#.values
+                             (good_times['Stop Time']<max(ds['time'])))]
     if 'NEP Start' not in gt: 
         gt['NEP Start'] = np.zeros(len(gt.values))
         print(' No Start')

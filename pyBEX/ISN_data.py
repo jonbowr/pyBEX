@@ -4,109 +4,69 @@ from .tools import *
 from . import hist as hi
 from . import TOF as tf
 
+
+def generate_isn_data(hist_location,tof_location,e2_hist_location,lazy_params = {},
+                        output_location = '',estep = range(1,9),
+                        goodtime_steps = [1,2,3]):
+    e2_dat = load_df(e2_hist_location,2,head = 'auto',calc_nep = False)
+    for step in estep:
+        hist_to_csv(lazy_histograms(hist_location,tof_location,
+                                    step,e2_dat,**lazy_params),
+                    step,output_location)
+
 def lazy_histograms(hist_location,tof_location,estep,tof2_dat,
-                            fil_goodtimes = [],nogt = [],apply_nep = False,
-                            include_partials = True):
-    # print(type(estep))
-
-    good_times = []
-    for gtf in fil_goodtimes:
-        good_times.append(import_good_times(gtf))
-
-    #import tof_data
-    ftype = "*e%d.txt"%(estep if type(estep)==int else estep[0])
-    import glob
-    for head_loc in glob.glob(tof_location + ftype):
-        try:
-            tof_head = get_headder(head_loc)
-            break
-        except(UnboundLocalError):
-            pass
-
-    # i = 0
-    # h_indexes = {}
-    # for thing in tof_head:
-    #     h_indexes[thing]=i
-    #     i+=1
-    # print(tof_head)
-    # use_cols = [h_indexes[thing] for thing in ['time','count','phase','type','tof0', 'tof1', 'tof2', 'tof3']]
-    df_tof = load_df(tof_location,estep,head = 'auto', calc_nep = True)
-    #import hist data
-    # hist_head = get_headder(glob.glob(hist_location + ftype)[0])
-    # print(hist_head)
-    # use_cols = [0,3,5,7]
-    df_hist = load_df(hist_location,estep,head='auto',calc_nep = True)
-
-    gt_hist = []
-    gt_tof = []
-    for goodt,no_gt in zip(good_times,nogt):
-        gt_tof.append(mask_good_times(df_tof,goodt,apply_nep = apply_nep,include_no_gt = no_gt,
-                                      return_mask=True,nep_start_max = 10,nep_stop_min = 20))
-        gt_hist.append(mask_good_times(df_hist,goodt,apply_nep = apply_nep,include_no_gt = no_gt,
-                                       return_mask=True,nep_start_max = 10,nep_stop_min = 20))
-
-   
-    #square the histogram bins and apply goodtime filter
-    # mat_df = hi.group_up(df_hist.loc[np.logical_and.reduce(gt_hist)])
-    mat_df = hi.square_split(df_hist.loc[np.logical_and.reduce(gt_hist)])
-    # mat_df.df[]
-
-    #define the species in the tof files
-    df_gt = tf.lut_species(df_tof.loc[np.logical_and.reduce(gt_tof)])
-
-    # bin the tof species using the hist bins
-    t_bins,p_bins = mat_df.get_bins()['count']
-    p_vals = mat_df.get_axes()['count'][1]
-    for spec in np.unique(df_gt['species']):
-        loc = df_gt['species']==spec
-        nam = 'tof%s'%spec
-        
-        hist = np.histogram2d(df_gt['time'].loc[loc],df_gt['phase'].loc[loc],
-                                   bins = [t_bins,p_bins],weights = df_gt['count'].loc[loc])[0]
-        for p,h in zip(p_vals,hist.T):
-            mat_df.df[(nam,p)] = h
-
-    # compile df of matrices
-    if include_partials:
-        return(mat_df.accum_bins(8,reduce_f = ({
-                                                'time':np.nanmean,
-                                                 'start_time':np.nanmin,
-                                                 'end_time':np.nanmax,
-                                                 'dt':np.nansum
-                                                })))
-    else:
-        mat_out = mat_df.accum_bins(8,reduce_f = ({'time':np.mean,
-                                                'start_time':np.min,
-                                                'end_time':np.max,
-                                                'dt':np.sum
-                                                }))
-        mat_out.df.dropna(inplace = True)
-        return(mat_out)
-
-
-def lazy_histograms2(hist_location,tof_location,estep,tof2_dat,
                         fil_goodtimes = [],nogt = [],apply_nep = False,
-                        include_partials = True,include_DE = True):
+                        bin_function = 'square_spinterp',
+                        include_partials = True,
+                        include_DE = True):
+    
+    #============================================================
+    # init funcs/params
+
+    def accum_filter(df,gt_dat,include_no_gt,e2_dat):
+        filters = []
+        for gt,no_gt in zip(gt_dat,include_no_gt):
+            filters.append(mask_good_times(df,gt,
+                                          apply_nep = False,include_no_gt = no_gt,
+                                          return_mask=True,nep_start_max = 10,nep_stop_min = 20))
+        filters.append(tof_2_filt(df,e2_dat))
+        return(np.logical_and.reduce(filters))
+
+    def median_filt(vals = [], buffer = .05):
+        #gets rid of outliers
+        filters = []
+        for v in vals:
+            med = np.nanmedian(v)
+            filt = np.logical_and(v>med*(1-buffer),v<med*(1+buffer))
+            filters.append(filt)
+            print(np.sum(filt)/len(filt))
+        return(np.logical_and.reduce(filters))
+
+
+    bin_funcs = {
+                    'square_up': hi.square_up,
+                    'square_manybin': hi.square_manybin,
+                    'square_spinterp': hi.square_spinterp,
+                    'square_groups': hi.square_groups,
+                }
+    #============================================================
+    
+
+    # load goodtimes
     good_times = []
     for gtf in fil_goodtimes:
         good_times.append(import_good_times(gtf))
 
-    #import tof_data
-    ftype = "*e%d.txt"%(estep if type(estep)==int else estep[0])
-    import glob
-    for head_loc in glob.glob(tof_location + ftype):
-        try:
-            tof_head = get_headder(head_loc)
-            break
-        except(UnboundLocalError):
-            pass
 
+    # load histogram data 
     df_hist = load_df(hist_location,estep,head='auto',calc_nep = True)
 
-    mat_df = hi.square_up3(df_hist)
+    # square histogram data 
+    mat_df = bin_funcs[bin_function](df_hist)
 
 
     if include_DE:
+        # load DE data and implement into historam df
         df_tof = load_df(tof_location,estep,head = 'auto', calc_nep = True)
         #define the species in the tof files
         df_gt = tf.lut_species(df_tof)
@@ -123,38 +83,31 @@ def lazy_histograms2(hist_location,tof_location,estep,tof2_dat,
             for p,h in zip(p_vals,hist.T):
                 mat_df.df[(nam,p)] = h
 
+    # apply different goodtime filters inputting nan values in place
+    mat_df.mask(~accum_filter(mat_df,good_times,[True,False],tof2_dat),
+                                            inplace = True)
 
-    def accum_filter(df,gt_dat,include_no_gt,e2_dat):
-        filters = []
-        for gt,no_gt in zip(gt_dat,include_no_gt):
-            filters.append(mask_good_times(df,gt,
-                                          apply_nep = False,include_no_gt = no_gt,
-                                          return_mask=True,nep_start_max = 10,nep_stop_min = 20))
-        filters.append(tof_2_filt(df,e2_dat))
-        return(np.logical_and.reduce(filters))
+    if include_partials:
+        # apply reduce function accounting for nan values
+        return(mat_df.accum_bins(8,reduce_f = ({
+                                                'time':np.nanmean,
+                                                 'start_time':np.nanmin,
+                                                 'end_time':np.nanmax,
+                                                 'dt':np.nansum
+                                                })))
 
-    def median_filt(vals = [], buffer = .05):
-        filters = []
-        for v in vals:
-            med = np.nanmedian(v)
-            filt = np.logical_and(v>med*(1-buffer),v<med*(1+buffer))
-            filters.append(filt)
-            print(np.sum(filt)/len(filt))
-        return(np.logical_and.reduce(filters))
-    
-
-
-    t_dat = mat_df.mask(~accum_filter(mat_df,good_times,[True,False],tof2_dat),
-                                        inplace = False).accum_bins(8,
-                                        reduce_f ={
-                                                    't_mean':np.mean,
-                                                    'time':np.mean,
-                                                     'start_time':np.min,
-                                                     'end_time':np.max,
-                                                     'dt':np.sum
-                                                      })
-    return(t_dat.mask(~median_filt(vals = [t_dat['end_time']-t_dat['start_time'],
-                            abs(1376-t_dat['dt'])],buffer = .05),inplace = False))
+    else:
+        # apply reduce function make all partial bins nan
+        t_dat = mat_df.accum_bins(8,reduce_f ={
+                                                't_mean':np.mean,
+                                                'time':np.mean,
+                                                 'start_time':np.min,
+                                                 'end_time':np.max,
+                                                 'dt':np.sum
+                                              })
+        # drop nan values, as well as outliers associated with median filt
+        return(t_dat.mask(~median_filt(vals = [t_dat['end_time']-t_dat['start_time'],
+                                abs(1376-t_dat['dt'])],buffer = .05),inplace = False))
 
 def tof_mat_link(mat_df,df_gt,binby = ''):
     # bin the tof species using the hist bins
@@ -170,44 +123,9 @@ def tof_mat_link(mat_df,df_gt,binby = ''):
             mat_df.df[(nam,p)] = h
     return(mat_df)
 
-def extra_lazy_histograms(hist_pickel,tof_pickel,estep,fil_goodtimes):
-    # print(type(estep))
-    if apply_goodtimes==True:
-        good_times = list(import_good_times(f_gt) for fgt in fil_goodtimes)
-
-    df_tof = pd.read_pickle(tof_pickel)
-    mad_df = pd.read_pickle(hist_pickel)
-
-    for gt in good_times:
-        df_tof = df_tof.loc()
-    import hist_processing as hi
-    #square the histogram bins and apply goodtime filter
-    mat_df = hi.group_up((mask_good_times(df_hist,good_times,apply_nep = True) if apply_goodtimes else df_hist))
-
-    #define the species in the tof files
-    import tof_processing as tf
-    df_gt = tf.lut_species((mask_good_times(df_tof,good_times,apply_nep = True) if apply_goodtimes else df_tof))
-
-    # bin the tof species using the hist bins
-    t_bins,p_bins = mat_df.get_bins()['hist']
-    p_vals = mat_df.get_axes()['hist'][1]
-    for spec in np.unique(df_gt['species']):
-        loc = df_gt['species']==spec
-        nam = 'tof%s'%spec
-        
-        hist = np.histogram2d(df_gt['time'].loc[loc],df_gt['phase'].loc[loc],
-                                   bins = [t_bins,p_bins],weights = df_gt['count'].loc[loc])[0]
-        for p,h in zip(p_vals,hist.T):
-            mat_df.df[(nam,p)] = h
-    mat_df.mask(~tof2_filt(mat_df,tof2_dat),inplace = True)
-    # compile df of matrices
-    return(mat_df.accum_bins(8,reduce_f = {'time':np.nanmean,
-                                                             'start_time':np.nanmin,
-                                                             'end_time':np.nanmax,
-                                                             'dt':np.nansum}))
-
 
 def hist_to_csv(mat_df,estep,output_location = ''):
+    # takes mat_df data struct and outputs csv file in ISN_data format
     from datetime import datetime,timedelta
     import os
 
@@ -261,16 +179,6 @@ def hist_to_csv(mat_df,estep,output_location = ''):
             pd.DataFrame(cols).T.to_csv(out_direct+nam,index = False,header = False)
 
 
-def generate_isn_data(hist_location,tof_location,e2_hist_location,lazy_params = {},
-                        output_location = '',estep = range(1,9),
-                        goodtime_steps = [1,2,3]):
-    e2_dat = load_df(e2_hist_location,2,head = 'auto',calc_nep = False)
-    for step in estep:
-        hist_to_csv(lazy_histograms2(hist_location,tof_location,
-                                    step,e2_dat,**lazy_params),
-                    step,output_location)
-
-
 def tof_to_hist(mat_df,df_gt,species = None):
     t_bins,p_bins = mat_df.get_bins()['hist']
     p_vals = mat_df.get_axes()['hist'][1]
@@ -292,14 +200,11 @@ def tof_to_hist(mat_df,df_gt,species = None):
 
 
 def txt_to_df(loc, output_location = '',fname = '',ftype = '.txt',to_hist = False,replace = False):
-    # loc = r'C:\Users\Jonny Woof\Box Sync\IBEX Data\Data\trial\SOC_txt\hist_dat'
     import os
     step = []
     for root,lcc,fil in os.walk(loc):
         for stuff in fil:
             step.append(stuff.split('_')[-1].strip(ftype))
-            # ftype.append(stuff.split('_')[-1].split('.')[-1])
-    # print(step)
     for en in np.unique(np.array(step)):
         new_fil = output_location+fname+en+'.pkl'
         if not os.path.exists(new_fil) or replace == True:
@@ -312,7 +217,6 @@ def txt_to_df(loc, output_location = '',fname = '',ftype = '.txt',to_hist = Fals
                 if thing.empty == False:
                     temp_df = group_up(thing).df
                 else:temp_df = thing
-            # if temp_df:
             temp_df.to_pickle(new_fil)
         else:
             print('%s already exists, choose new filename or set replace = True'%new_fil)
@@ -320,8 +224,6 @@ def txt_to_df(loc, output_location = '',fname = '',ftype = '.txt',to_hist = Fals
 
 def tof_2_filt(df,e2_dat,percentile = .15,inplace = True):
     if 'TOF2_E2' not in df['eph']:
-        #load tof2 dat
-        # e2_dat = load_df(tof2_loc,2,head = 'auto',calc_nep = False)
         # Use only counts from sector 1
         sect_1 = .17
         sects = np.logical_and.reduce([e2_dat['phase']<.5,abs(e2_dat['phase']-sect_1)>sect_1/2])
@@ -329,7 +231,6 @@ def tof_2_filt(df,e2_dat,percentile = .15,inplace = True):
         df.add(e2_dat.loc[sects]['time'].values,e2_dat.loc[sects]['count'].values,
                             statistic = 'max',label = 'TOF2_E2')
 
-    # from scipy.ndimage import gaussian_filter as gf
     vals = df['TOF2_E2'].values
     #smooth tof2 data to use for the filter
     sig = np.nanmin(np.stack([gauss_filt_nan(vals,sigma= 1),
@@ -352,23 +253,8 @@ def tof_2_filt(df,e2_dat,percentile = .15,inplace = True):
 
 
 def mat_df_test(mat_df,labels = None):
-    spin_time_av = 14.5
+    # Plot and test the mat_df generated data
 
-    ref_Vals = ['avg_spin: 14.5 sec']
-
-    # things = {
-    # 'stop_start':mat_df['end_time']-mat_df['start_time'],
-    # 'mid_start':mat_df['time']-mat_df['start_time'],
-    # 'stop_mid':mat_df['end_time']-mat_df['time'],
-    # }
-    # print('different dt:')
-    # print((np.unique(mat_df['dt'][~np.isnan(mat_df['dt'])])/14.4/8))
-    # for lab,val in things.items():
-    #     print(lab)
-    #     print('  min:%d'%np.nanmin(val))
-    #     print('  max:%d'%np.nanmax(val))
-
-    # print(np.nansum(mat_df['count']))
     mat_hist = mat_df
     from matplotlib import pyplot as plt
     fig,axs = plt.subplots(10)
@@ -400,14 +286,10 @@ def mat_df_test(mat_df,labels = None):
                 txt1[lab] = ['discreet vals:']
                 txt2[lab] = []
                 
-            # txt[lab].append(str(lab))
-            # txt1[lab].append('different vals:')
             unq = np.unique(val[~np.isnan(val)])
             txt1[lab].append(str(len(unq)))
             txt1[lab].append(np.array2string(unq,max_line_width = 30,
                                        precision= 2,separator = ',',threshold = 10))
-            
-            # tx[lab].append('Fraction out of med:')
 
             txt2[lab].append('[%s] min:%f'%(labs,np.nanmin(val)))
             txt2[lab].append('max:%f'%np.nanmax(val))
@@ -415,8 +297,7 @@ def mat_df_test(mat_df,labels = None):
             ax.axvline(med)
             txt2[lab].append('med:%f'%med)
             txt2[lab].append('med_frac:%f'%(np.sum(np.logical_and(val<med*1.01,val>med*.99))/len(val[~np.isnan(val)])))
-            
-            # print(txt)
+
 
             ax.hist(val,50,alpha = .2,density = False,label = labs)
             ax.set_title(lab)
@@ -438,19 +319,3 @@ def mat_df_test(mat_df,labels = None):
                         )
             ax.semilogy()
     fig.tight_layout()
-    # ax[1].hist(np.diff(mat_hist['t_mean']),50,alpha = .2)
-    # ax[1].set_title('diff(t_mean)')
-
-    # for thing in ['start_time','end_time']:
-    #     ax[2].hist((mat_hist['time'].values-mat_hist[thing]),50,alpha = .2)
-    # # ax[2].set_title()
-
-    # ax[3].hist(mat_hist['dt'][~np.isnan(mat_hist['dt'])],20)
-
-    # ax[4].hist(mat_hist['time']-mat_hist['t_mean'],50)
-    # dt = np.nanmedian(np.diff(mat_hist['time']))
-    # for l in [dt/2,-dt/2]:
-    #     ax[4].axvline(l)
-    fig.tight_layout()
-    # for a in ax:
-    #     a.semilogy()

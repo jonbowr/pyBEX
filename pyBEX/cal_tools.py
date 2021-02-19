@@ -168,12 +168,22 @@ def getListOfFiles(dirName):
         else:
             allFiles.append(fullPath)
     return allFiles
+
 def dat_loc(fil,home):
     import os
+    f_indicator = fil.strip('.rec').split('_')[-2:]
     for f in getListOfFiles(home):
-        if fil in f and '.rec' not in f:
+        # if fil in f and '.rec' not in f:
+        #     return(f)
+        if all(find in f for find in f_indicator) and '.rec' not in f:
             return(f)
-        
+# def dat_locations(fils,home = './'):
+#     filz = []
+#     for fil in fils:
+#         floc = dat_loc(str(fil).strip('.rec'),home = home)
+#         if floc:
+#             filz.append(floc)
+#     return(filz)
 
 def s_run_get_dat(s_run_loc,combine = True,
                   ref_nam = 'file_name',load_params = {},home = './'):
