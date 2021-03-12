@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 from .mat_df import mat_df
+from scipy.interpolate import interp1d
 
 
 def hdf(dat,dat_cols,mat,mat_cols,
@@ -9,34 +10,6 @@ def hdf(dat,dat_cols,mat,mat_cols,
                                   dat_cols+list(mat_cols)],names = ['type','lab'])
     for d in [dat,mat]:print(d.shape)
     return(pd.DataFrame(np.concatenate([dat,mat],axis = 1),columns = h))
-
-
-def accum_duplicate_times(df_hist,dt_multiplier = 8):
-    # inputs pandas df, accumulates counts in redundant time bins,
-    # calculates dt
-
-    import time
-    df_acc = df_hist.copy()
-
-    # define parameter to calculate individual bin exposure time
-    df_acc['dt'] = np.ones(df_acc.shape[0])
-    
-    # accumulate counts and exposure time of duplicate timesteps
-    df_acc[['count','dt']] = df_acc.groupby(['time'])['count','dt'].transform('sum')
-
-    # drop redundant duplicates
-    df_acc.drop_duplicates('time',inplace = True)
-    
-    # calc average exposure time/bin 
-    dt_av = np.median(np.diff(df_acc['time']))
-    df_acc['dt'] = (df_acc['dt']*dt_av*dt_multiplier)#.round(8)
-    
-    # Define the orbit number as a float to differentiate arc
-    # Need to move else where in analysis 
-    orb = df_acc['orbit'].values.astype(float)
-    orb[df_acc['arc']=='b'] += .5
-    df_acc['orbit'] = orb
-    return(df_acc)
 
 
 def phase_round(phase_angle,bin_edges,binm):
@@ -255,12 +228,79 @@ def square_manybin(df_in,bin_width = 6,spin_sum = 1,
 
 
 
-def square_spinterp(df_in,bin_width = 6,spin_sum = 1,nan_edge = 'mean',square_params = {}):
+def interpt(time, med_window = 7,
+                fix_thresh = 2,
+                reducer = np.round,
+                round_to = 1,
+                vals_out = True):
+    # t_no = time[~np.isnan(time)]
+    # t_stepin = (t_no-t_no[0])/(t_no[-1]-t_no[0])
+    # dt = t_no[-1]-t_no[0]
+    # spino = np.median(np.diff(t_no))
+    # return(np.interp(np.linspace(0,1,(int(dt/spino*2))),t_stepin,t_no,left = np.nan,right = np.nan))
+    
+    dtime = np.diff(time,prepend = time[0]-np.nanmedian(np.diff(time)))
+    med_time = np.nanmedian(dtime)
+    logo = np.ones(len(dtime)).astype(bool)
+    #np.logical_or(np.abs(dtime/med_time-1)>0,np.abs(dtime/med_time-1)>2)
+    hist_o = pd.DataFrame(time[logo].reshape(-1,1),columns = ['time'])
+    # dtime = np.diff(time,append = time[-1]+np.median(np.diff(time)))
+    # utime = 
+    hist_o['t_step'] = dtime[logo]
+    # hist_o['t_step'].loc[dtime[logo]<800]= np.nanmedian(dtime)
 
+
+    spin_av = hist_o['t_step'].rolling(window = med_window,center = True).median().values
+    jumps = abs(dtime[logo]/med_time-1)>fix_thresh
+    # forward_indexer = pd.api.indexers.FixedForwardWindowIndexer(window_size=med_window)
+    # spin_av[jumps] = np.nanmean(
+    #                     np.stack(
+    #                         [hist_o['t_step'].rolling(window = med_window).median().values,
+    #                          hist_o['t_step'].rolling(window = forward_indexer).median().values]
+    #                          ),
+    #                     axis = 0
+    #                     )[jumps]
+
+    spin_av[jumps] = med_time
+    # spin_av = hist_o['t_step'].rolling(window = med_window).min(center = True).values
+
+
+    spin_av[np.isnan(spin_av)] = np.nanmedian(spin_av)
+    hist_o['t_step_av'] = spin_av
+
+    # rnd = np.max(np.stack([np.floor((hist_o['t_step']/spin_av)),
+    #                 np.ceil((hist_o['t_step']/spin_av).round(1))]),axis = 0).flatten().round(0)
+    # print(spin_av.shape)
+    rnd = reducer((hist_o['t_step']/spin_av).round(round_to))
+    rnd[rnd==0]=1
+    # rnd = hist_o['t_step']/spin_av
+    hist_o['spin_n'] = np.cumsum(rnd)
+
+    # time_interp = np.interp(np.arange(1,np.max(hist_o['spin_n'].values)+1),
+    #                      hist_o['spin_n'].values,hist_o['time'].values,left = np.nan,right = np.nan)
+    # step_interp = np.interp(np.arange(1,np.max(hist_o['spin_n'].values)+1),
+    #                      hist_o['spin_n'].values,spin_av,left = np.nan,right = np.nan)
+
+
+    def_vals = np.arange(1,np.nanmax(hist_o['spin_n'].values)+1)
+    time_interp = interp1d(hist_o['spin_n'].values,hist_o['time'].values,kind = 'linear')(def_vals)
+
+    if vals_out:
+        step_interp = interp1d(hist_o['spin_n'].values,spin_av)(def_vals)
+        return(time_interp,step_interp,hist_o)
+    else:
+        # return(np.interp(np.arange(1,np.nanmax(hist_o['spin_n'].values)+1),
+        #          hist_o['spin_n'].values,hist_o['time'].values,left = np.nan,right = np.nan))
+        return(time_interp)
+
+def multi_bin(df,bin_edges,labels,actions,accum_labels,
+              direct_bin = 'count',
+              max_bint = 300,true_square = False,square_params = {}):
     def square_bin(df,bin_edges,
-                    bin_width = 6,
-                        spin_num = 1,binw = 4):
-
+                bin_width = 6,
+                    direct_bin = 'count',
+                    # spin_num = 10,
+                    binw = 3):
 
         stop_flip = np.argwhere(np.diff(df['phase'])<0).flatten().astype(int)
         start_flip = stop_flip+1 
@@ -271,13 +311,14 @@ def square_spinterp(df_in,bin_width = 6,spin_sum = 1,nan_edge = 'mean',square_pa
         t_flip = np.argwhere(np.logical_or(
                                 np.logical_and(np.diff(df['phase'])<0,
                                                 np.diff(df['time'])>spint),
-                                np.diff(df['time'])>cyclet*2)
+                                np.diff(df['time'])>cyclet)
                                             ).flatten().astype(int)
         start_flip = np.insert(t_flip+1,0,0)
 
 
         t_start = df['time'].values[np.insert(t_flip+1,0,0)]
         t_stop = np.append(df['time'].values[t_flip],t_start[-1]+spint)
+
         time_bins = np.stack([t_start-spint*binw,t_stop+spint*binw]).T.flatten()
 
 
@@ -285,55 +326,97 @@ def square_spinterp(df_in,bin_width = 6,spin_sum = 1,nan_edge = 'mean',square_pa
 
         from scipy.stats import binned_statistic_2d as bin2d
         
-        return(bin2d(df['time'],df['phase'],df['count'],
-                               bins = [time_bins,bin_edges],expand_binnumbers=True,statistic = 'sum'))
+        return(bin2d(df['time'],df['phase'],df[direct_bin],
+                               bins = [time_bins,bin_edges],
+                               expand_binnumbers=True,statistic = 'sum'))
 
-    def manybin(df,bin_edges,labels,actions,accum_labels,max_bint = 300):
-        counts,xbins,ybins,locs = square_bin(df,bin_edges,**square_params)
+    # print(true_square)
+    if not true_square:
+        db,xbins,ybins,locs = square_bin(df,bin_edges,direct_bin = direct_bin,**square_params)
         dat = {}
         for lab in np.unique(np.array(labels)):
-            things = (np.zeros(counts.shape)*np.nan)
-            things[[locs[0,:]-1,locs[1,:]-1]] = df[lab].values
-            dat[lab] = things
-        dat['count'] = counts
+            # if lab is not direct_bin:
+            things = (np.zeros(db.shape)*np.nan)
+            things[(locs[0,:]-1,locs[1,:]-1)] = df[lab].values
+            # print(~np.all(np.isnan(things)))
 
-        out_dat = {}
-        for lab,act,nlab in zip(labels,actions,accum_labels):
-            out_dat[nlab]=(act(dat[lab],axis =1).reshape(-1,1) if act else dat[lab].copy())[::2]
-        return(out_dat)
+            # print(~np.all(np.isnan(things),axis = 0))
+            dat[lab] = things[~np.all(np.isnan(things),axis = 1)]
+            # else:
+            #     dat[direct_bin] = db
+    else:
+        dat = {}
+        print('its_square!')
+        for lab in np.unique(np.array(labels)):
+            dat[lab] = df[lab].values.reshape(-1,len(bin_edges)-1)
 
-    def interpt(time):
-        t_no = time[~np.isnan(time)]
-        t_stepin = (t_no-t_no[0])/(t_no[-1]-t_no[0])
-        dt = t_no[-1]-t_no[0]
-        spino = np.median(np.diff(t_no))
-        return(np.interp(np.linspace(0,1,int(dt/spino)),t_stepin,t_no,left = np.nan,right = np.nan))
-
-
-    bin_edges = np.linspace(0,1,int(360/bin_width)+1)#-3/360
-    binm =(bin_edges[1:]+bin_edges[:-1])/2
-    t_dict = manybin(accum_duplicate_times(df_in),bin_edges,
-                                labels = ['time','orbit','dt','count','phase'],
-                                actions= [np.nanmean,np.nanmax,np.nansum,None,None],
-                                accum_labels = ['t_mean','orbit','dt','count','phase'])
+    out_dat = {}
+    for lab,act,nlab in zip(labels,actions,accum_labels):
+        out_dat[nlab]=(act(dat[lab],axis =1).reshape(-1,1) if act else dat[lab].copy())
+    return(out_dat)
 
 
+
+def square_spinterp(df_in,bin_width = 6,spin_sum = 1,nan_edge = 'mean',
+                    square_params = {},interp_params  = {},true_square = False,
+                            drop_extreams = False,time_binner = 'middle'):
+
+
+    if true_square:
+        binm = np.sort(np.unique(df_in['phase']))
+        bin_edges = np.append(binm-np.nanmedian(np.diff(binm))/2,binm[-1]+np.nanmedian(np.diff(binm))/2)
+    else:
+        bin_edges = np.linspace(0,1,int(360/bin_width)+1)#-3/360
+        binm =(bin_edges[1:]+bin_edges[:-1])/2
+
+    t_dict = multi_bin(df_in,bin_edges,
+                                labels = ['time','orbit','time','dt','count'],
+                                actions= [np.nanmean,np.nanmedian,np.nanmin,np.nansum,None],
+                                accum_labels = ['t_mean','orbit','start_time','dt','count'],
+                                true_square = true_square,
+                                square_params = square_params,
+                                direct_bin = 'count')
+    print('sdfds')
+    # return(t_dict)
+    # return(pd.DataFrame(t_dict))
 
     # interpolate time bins to make continuous
-    tt = interpt(t_dict['t_mean'])
+    tt,dif_interp = interpt(t_dict['t_mean'].flatten(),
+                                med_window=21,
+                                  fix_thresh=2,
+                                  vals_out = True,
+                                 reducer = np.round,
+                                 round_to = 1)[:2]
+    f_orb = interp1d(t_dict['t_mean'].flatten(),t_dict['orbit'].flatten(),
+                                kind = 'nearest',fill_value='extrapolate')
+    # tt = rep_interpt(t_dict['t_mean'],4)
+    # del(t_dict['phase'])
+
+    # print(dif_norm.shape)/
+    # print(tt.shape)
     tbin = np.nanmedian(np.diff(tt))
-    dif_norm = np.append(np.diff(tt),tbin)
+    # dif_norm = np.append(np.diff(tt),tbin)
 
-    time_bins = np.insert(tt+dif_norm/2,0,tt[0]-tbin/2)
+    # print(tt[:10])
+    # print(dif_norm[:10])
 
+    # time_bins = np.insert(tt+diff/2,0,tt[0]-tbin/2)
+    # dif_norm = np.append(np.diff(tt),tbin)
+    # time_bins = np.insert(tt+dif_norm/2,0,tt[0]-tbin/2)
+    dif_norm = np.insert(np.diff(tt),0,tbin)
+
+    time_bins = np.append(tt-dif_norm/2,tt[-1]+tbin/2)
+    # time_bins = tt-tbin/2
+    # print(dif_norm)
     t_loc = np.digitize(t_dict['t_mean'],time_bins).flatten()-1
 
     # define special start and end times
-    for nam in ['start_time','end_time']:
-        t_dict[nam] = t_dict['t_mean'].copy()
+    # for nam in ['start_time','end_time']:
+    #     t_dict[nam] = t_dict['t_mean'].copy()
 
     # interpolate all params to new time bins, fill in with nans
-    eph_dat = {'time':(time_bins[1:]+time_bins[:-1]).reshape(-1,1)/2}
+    # eph_dat = {'time':(time_bins[1:]+time_bins[:-1]).reshape(-1,1)/2}
+    eph_dat = {'time':(tt).reshape(-1,1)}
     mat_dat = {}
     min_labs = {'eph':[np.array(['time'])]}
     for nam,val in t_dict.items():
@@ -346,14 +429,145 @@ def square_spinterp(df_in,bin_width = 6,spin_sum = 1,nan_edge = 'mean',square_pa
             eph_dat[nam] = thing
             min_labs['eph'].append(np.array([nam]))
 
+    for nam in ['end_time']:
+            min_labs['eph'].append(np.array([nam]))
+    
+    if time_binner == 'middle':
+        # define special start and end times
+        for nam in ['start_time','end_time']:
+            eph_dat[nam] = eph_dat['t_mean'].copy()
+
+        tmean = eph_dat['t_mean'].copy()
+        tbo = eph_dat['time'].copy()
+
+        eph_dat['start_time'][1:] = (tmean[1:]+tmean[:-1])/2
+        eph_dat['start_time'][0] += -tbin/2
+        eph_dat['end_time'][:-1] = (tmean[1:]+tmean[:-1])/2
+        eph_dat['end_time'][-1] += tbin/2
+
+
+        start_na = np.isnan(eph_dat['start_time'])  
+        end_na = np.isnan(eph_dat['end_time'])
+        if nan_edge == 'mean':
+            eph_dat['start_time'][start_na] = tmean[start_na]-tbin/2
+            eph_dat['end_time'][end_na] = tmean[end_na]+tbin/2
+        elif nan_edge == 'bin':
+            dif_up = np.append(np.diff(tt),tbin)
+            dif_down = np.insert(np.diff(tt),0,tbin)
+            eph_dat['start_time'][start_na] = eph_dat['time'][start_na]-dif_down[start_na]/2
+            eph_dat['end_time'][end_na] = eph_dat['time'][end_na]+dif_up[end_na]/2
+        elif nan_edge == 'interp':
+            from scipy.ndimage import gaussian_filter as gf
+            dif_interp = gf(dif_interp,4).reshape(-1,1)
+            eph_dat['start_time'][start_na] = eph_dat['end_time'][start_na]-dif_interp[start_na]
+            eph_dat['end_time'][end_na] = eph_dat['start_time'][end_na]+dif_interp[end_na]
+    elif time_binner == 'start':
+
+        from scipy.ndimage import gaussian_filter as gf
+        dif_interp = gf(dif_interp,4).reshape(-1,1)
+        eph_dat['end_time'] = np.zeros(len(eph_dat['t_mean'])).reshape(-1,1)*np.nan
+        eph_dat['end_time'][:-1] = eph_dat['start_time'][1:]
+        end_na = np.isnan(eph_dat['end_time'])
+        eph_dat['end_time'][end_na] = eph_dat['start_time'][end_na]+dif_interp[end_na]
+
+    eph_dat['orbit'] = f_orb(eph_dat['time'])
     min_labs['eph'] = np.concatenate(min_labs['eph'])
-    eph_dat['start_time'] += -dif_norm.reshape(-1,1)/2
-    eph_dat['end_time'] += dif_norm.reshape(-1,1)/2
 
 
-    return(mat_df(dat = [np.concatenate(list(eph_dat.values()),axis = 1)]+list(mat_dat.values()), 
+    mat_out = mat_df(dat = [np.concatenate(list(eph_dat.values()),axis = 1)]+list(mat_dat.values()), 
                                 minor_lables = list(min_labs.values()),
-                                major_lables = list(min_labs.keys())))
+                                major_lables = list(min_labs.keys()))
+
+    return(mat_out)
+
+
+def square_spinterp2(df_in,bin_width = 6,spin_sum = 1,nan_edge = 'mean',
+                    square_params = {},interp_params  = {},true_square = False,
+                            drop_extreams = False,time_binner = 'middle',
+                            extra_bin = [],extra_actions = [],extra_labels = []):
+
+    if true_square:
+        binm = np.sort(np.unique(df_in['phase']))
+        bin_edges = np.append(binm-np.nanmedian(np.diff(binm))/2,binm[-1]+np.nanmedian(np.diff(binm))/2)
+    else:
+        bin_edges = np.linspace(0,1,int(360/bin_width)+1)
+        binm =(bin_edges[1:]+bin_edges[:-1])/2
+
+
+    t_dict = multi_bin(df_in,bin_edges,
+                        labels = ['orbit','time','phase']+extra_bin,
+                        actions= [np.nanmedian,np.nanmin,None]+extra_actions,
+                        accum_labels = ['orbit','t_mean','phase']+extra_labels,
+                        true_square = true_square,
+                        square_params = square_params,
+                        direct_bin = 'time')
+
+    # t_mid = np.zeros(t_dict['t_mean'].shape)
+    # t_mid[:-1] = (t_dict['start_time'][:-1]+t_dict['start_time'][1:])/2
+    # t_mid[-1] = t_dict['start_time'][-1]+np.nanmedian(t_mid-t_dict['start_time'])
+    # t_dict['t_mean'] = t_mid
+    # t_dict['t_mean'] = t_dict['start_time'].copy()
+
+    # interpolate time bins to make continuous
+    # tt,dif_interp = interpt(t_dict['t_mean'].flatten(),
+    #                                 med_window=21,
+    #                                   fix_thresh=2,
+    #                                   vals_out = True,
+    #                                  reducer = np.round,
+    #                                  round_to = 1)[:2]
+    # tt = tt+dif_interp/2
+    tt = interpt(t_dict['t_mean'].flatten(),
+                                med_window=21,
+                                  fix_thresh=2,
+                                  vals_out = False,
+                                 reducer = np.round,
+                                 round_to = 1)
+
+    # f_orb = interp1d(t_dict['t_mean'].flatten(),t_dict['orbit'].flatten(),
+    #                             kind = 'nearest',fill_value='extrapolate')
+
+    tbin = np.nanmedian(np.diff(tt))
+    dif_norm = np.insert(np.diff(tt),0,tbin)
+
+    time_bins = np.append(tt-dif_norm/2,tt[-1]+tbin/2)
+    t_loc = np.digitize(t_dict['t_mean'],time_bins).flatten()-1
+    # t_loc = np.digitize(t_mid,time_bins).flatten()-1
+
+    # interpolate all params to new time bins, fill in with nans
+    eph_dat = {'time':(tt).reshape(-1,1)}
+    mat_dat = {}
+    min_labs = {'eph':[np.array(['time'])]}
+    for nam,val in t_dict.items():
+        thing = np.zeros((len(time_bins)-1,val.shape[1]))*np.nan
+        thing[t_loc] = val
+        if val.shape[1]>1:    
+            mat_dat[nam] = thing
+            min_labs[nam]=binm.round(6)
+        else:
+            eph_dat[nam] = thing
+            min_labs['eph'].append(np.array([nam]))
+
+    # for nam in ['end_time']:
+    #         min_labs['eph'].append(np.array([nam]))
+
+    # from scipy.ndimage import gaussian_filter as gf
+    # dif_interp = gf(dif_interp,4).reshape(-1,1)
+    # eph_dat['end_time'] = np.zeros(len(eph_dat['t_mean'])).reshape(-1,1)*np.nan
+    # eph_dat['end_time'][:-1] = eph_dat['start_time'][1:]
+    # end_na = np.isnan(eph_dat['end_time'])
+    # eph_dat['end_time'][end_na] = eph_dat['start_time'][end_na]+dif_interp[end_na]
+
+    # eph_dat['orbit'] = f_orb(eph_dat['time'])
+    min_labs['eph'] = np.concatenate(min_labs['eph'])
+
+
+    mat_out = mat_df(dat = [np.concatenate(list(eph_dat.values()),axis = 1)]+list(mat_dat.values()), 
+                                minor_lables = list(min_labs.values()),
+                                major_lables = list(min_labs.keys()))
+
+    return(mat_out)
+
+
 
 
 def square_groups(df_in,bin_width = 6,to_mat_df = True,dt_multiplier = 8):

@@ -225,7 +225,7 @@ def s_run_plot(s_run_loc,overplot = True,ref_nam = 'file_name',
     
     if dats:
         if hist_bins == 'auto':
-            from .tools import tof_expected
+            from .tof_tools import tof_expected
             tofs_ideal = tof_expected(np.unique(s_run_loc['ke'].values),
                                       np.unique(s_run_loc['species'].str.replace('+','')))
             bins = {}
