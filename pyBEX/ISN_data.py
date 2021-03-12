@@ -1,6 +1,6 @@
 import numpy as np
 import pandas as pd
-from .tools import *
+from .tools.data import *
 from . import hist as hi
 from . import TOF as tf
 
