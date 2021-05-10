@@ -14,7 +14,9 @@ def tof_filter(df_gt,maxv= 1.4,tof_dims = {'tof0':50,'tof1':22.5,'tof2':27.7}):
 
     speed_max = np.logical_and.reduce([tof_dims[nam]/df_gt[nam]< maxv for nam in tof_dims])
     checksum = abs(df_gt['tof0']+df_gt['tof3']-df_gt['tof2']-df_gt['tof1'])<2
-    loco = np.logical_and.reduce([checksum,speed_max,df_gt['type'] == 0])
+    loco = np.logical_and.reduce([checksum,
+                                 speed_max,
+                                 df_gt['type'] == 0])
     # di = tof_dims
     # loco = ((abs(df_gt['tof0']+df_gt['tof3']-df_gt['tof2']-
     #              df_gt['tof1'])<2)&(df_gt['type'] == 0) &
@@ -23,7 +25,17 @@ def tof_filter(df_gt,maxv= 1.4,tof_dims = {'tof0':50,'tof1':22.5,'tof2':27.7}):
     # loco = abs(df_gt['tof0']+df_gt['tof3']-df_gt['tof2']-df_gt['tof1'])<2
     return(df_gt.loc[loco])
 
+def remove_delay(df):
+    df_nd = df.copy()
+    df_nd['tof0'] =df_nd['tof0']+df_nd['tof3']/2 
+    df_nd['tof1'] =df_nd['tof1']-df_nd['tof3']/2 
+    return(df_nd)
 
+def remove_delay_post_cal(df):
+    df_nd = df.copy()
+    df_nd['tof0'] =df_nd['tof0']+df_nd['tof3']/2 
+    df_nd['tof1'] =df_nd['tof1']-df_nd['tof3']/2 
+    return(df_nd)
 
 def tof_speeds(df_gt,tof_dims = {'tof0':50,'tof1':22.5,'tof2':27.7}):
     mindt = 0

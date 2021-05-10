@@ -8,13 +8,21 @@ def checksum(df_gt,check_max = 1):
     return(np.logical_and.reduce([abs(df_gt['TOF3'])<15,
             abs(df_gt['TOF0']+df_gt['TOF3']-df_gt['TOF2']-df_gt['TOF1'])<check_max]))
 
+def filt_trips(athing):
+    log_good = []
+    for stuff in athing:
+        if 'validtof' in stuff.lower():
+
+            # print(stuff)
+            log_good.append(athing[stuff].values.astype(bool))
+    return(np.logical_and.reduce(log_good))
 # Load the De files to pd data frame
 def load_dt(fil,
             use_filt = ['TOF0','TOF1','TOF2','TOF3'],
             filt_triples = False,
             apply_checksum = False,
             tof3_picker = 'Auto',
-               min_tof = None):
+               min_tof = None,tof_ac = True):
     stuff = ''
     for t in open(fil).readlines():
         if '#' in t:
@@ -34,6 +42,13 @@ def load_dt(fil,
     athing = pd.read_csv(fil,comment = '#',delim_whitespace= True,header = None,names = head)
     athing['tof0_sh'] = athing['TOF0']+athing['TOF3']/2
     athing['tof1_sh'] = athing['TOF1']-athing['TOF3']/2
+    if tof_ac:
+        from .tof import remove_delay_line as rdl
+        tof_real = rdl(*athing[['TOF0','TOF1','TOF2','TOF3']].T.values)
+        for lab,v in tof_real.items(): 
+            # print(v)
+            athing[lab] = v 
+
     log_good = [np.ones(len(athing)).astype(bool)]
 
     if apply_checksum:
@@ -76,7 +91,8 @@ def plot_tofs(dats,hist_plt = ['tof0_sh','tof1_sh','TOF2','TOF3'],
                             'TOF0': np.linspace(10,350,150),
                            'TOF1':np.linspace(10,150,75),  
                                 },
-                        norm = None,leg_lab = '',info = False):
+                        norm = None,leg_lab = '',info = False,
+                        legend_loc='right'):
     
     
     fig,axs = plt.subplots(np.ceil(len(hist_plt)/2).astype(int),2,sharey = False)
@@ -117,15 +133,17 @@ def plot_tofs(dats,hist_plt = ['tof0_sh','tof1_sh','TOF2','TOF3'],
                     ax.plot(mid,h/np.nanmax(h),alpha = .4,
                         label = slabel,)
                 else:
-                    ax.hist(thing[nam],bins = bins[nam],density = True,alpha = .2,
+                    ax.hist(thing[nam],bins = bins[nam],density = False,alpha = .2,
                         label = slabel,histtype = 'stepfilled')
-                    ax.hist(thing[nam],bins = bins[nam],density = True,alpha = .8,
+                    ax.hist(thing[nam],bins = bins[nam],density = False,alpha = .8,
                             histtype = 'step',color = 'k')
                 ax.set_xlabel('%s [nS]'%nam)
                 # ax.semilogy()
 #                 ax.semilogx()
-
-    axs.flatten()[1].legend(bbox_to_anchor=(1.05, 1), loc='upper left',title = leg_lab)
+    if legend_loc == 'right':
+        axs.flatten()[1].legend(bbox_to_anchor=(1.05, 1), loc='upper left',title = leg_lab)
+    elif legend_loc == 'below':
+        axs.flatten()[-2].legend(loc='upper left', bbox_to_anchor=(0, -0.225),title = leg_lab)
     fig.tight_layout()
 
     fig.subplots_adjust(hspace = .2,top = .925,left = .12)  
@@ -177,6 +195,7 @@ def dat_loc(fil,home):
         #     return(f)
         if all(find in f for find in f_indicator) and '.rec' not in f:
             return(f)
+    # return(np.nan)
 # def dat_locations(fils,home = './'):
 #     filz = []
 #     for fil in fils:
@@ -225,7 +244,7 @@ def s_run_plot(s_run_loc,overplot = True,ref_nam = 'file_name',
     
     if dats:
         if hist_bins == 'auto':
-            from .tof_tools import tof_expected
+            from .tof import tof_expected
             tofs_ideal = tof_expected(np.unique(s_run_loc['ke'].values),
                                       np.unique(s_run_loc['species'].str.replace('+','')))
             bins = {}
@@ -265,3 +284,66 @@ def import_srun(srun_loc):
                         header = 5,usecols = range(1,50))
     s_run.dropna(subset = ['file_name'],inplace = True)
     return(s_run)
+
+
+
+
+
+def s_run_plot_interact(s_s_run,PlotGroups,LineGroups,directory):
+    from ipywidgets import FloatSlider,interact,interactive,SelectMultiple
+    from .tof import tof_expected
+
+
+    group_dict = {str(lab):ind for lab,ind in s_s_run.groupby(PlotGroups).groups.items()}
+
+    spec_plot = ['tof0_sh','tof1_sh','TOF2','TOF3']
+    def update(Plot_values = group_dict.keys(),
+                Plot_times = SelectMultiple(options=spec_plot,index = [0,2]),
+               # group=np.unique(s_s_run[PlotGroups].values),
+                        bin_ns = FloatSlider(min=.1,max = 10,
+                        step = .2,continuous_update = False,
+                        value = 2),
+                        range_buffer = FloatSlider(min=.1,max = 2,
+                                                   step = .2,continuous_update = False,
+                                                   value = .7),
+                        
+                        Triples= True,
+                        checksum = True,
+                        norm = False,
+                        peak_info = False,
+                        logy = True,
+                        tof3_picker = False,
+                        legend_location = 'right'):
+
+            group = s_s_run.loc[group_dict[Plot_values]]#.dropna()
+
+            species = np.unique(group['species'].str.replace('+',''))
+            energies = np.unique(group['ke'].values)
+            # spec_plot = ['tof0_sh','TOF2']
+            fig,ax = s_run_plot(group,
+                                ref_nam = LineGroups,
+                                auto_params = {'binw':bin_ns,'buffer':range_buffer},
+                                load_params = {'filt_triples':Triples,
+                                                'apply_checksum':checksum,
+                                                'tof3_picker':('auto' if tof3_picker == True else None),
+                                                'min_tof':.01,'use_filt':['TOF3']
+                                              },
+                                plot_params = {'norm':(None if not norm else 'max'),
+                                               'hist_plt':list(Plot_times),
+                                               'leg_lab':LineGroups,
+                                               'info':peak_info,
+                                               'legend_loc':legend_location},
+                                home = directory)
+            for spec in species: 
+                for e in np.unique(group['ke'].values):
+                    print(spec.upper()+', '+str(e))
+                    tof_expect = tof_expected(e,spec.upper(),e_loss=0)
+                    for a,loc in zip(ax.flatten(),tof_expect[[s.lower().strip('_sh') for s in spec_plot]].values.flatten()):
+                        a.axvline(loc)
+                        if logy:
+                            a.semilogy()
+
+            fig.suptitle('%s : %s'%(PlotGroups,Plot_values),y = 1,x = .5,ha = 'center')
+    #         fig.supylabel('counts [normalized]')
+            fig.text(0.04, 0.5, 'counts [norm]', va='center',ha='center', rotation='vertical',fontsize = 20)
+    return(interactive(update))

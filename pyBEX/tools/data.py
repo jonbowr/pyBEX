@@ -24,6 +24,17 @@ def get_headder(fil):
         head[0]= 'time'
     return(head)
 
+def get_line_loc(fil,end_str,count_blanks = True):
+    with open(fil,'r') as f:
+        i = -1
+        l = ''
+        while end_str not in l:
+            l = f.readline()
+            # print(l)
+            if count_blanks or l.strip():
+                i+=1
+    return(i)
+
 
 def import_good_times(fil):
     lines = []
@@ -52,6 +63,13 @@ def import_good_times(fil):
         print("Auto Generated NEP Stop Range")
     return(arr)
 
+
+
+def load_me_show(f):
+    cols = get_headder(f)
+
+    return(pd.read_csv(f,delim_whitespace = True,header = None,
+                    comment = '#',names = (cols if cols else None)))
 
 
 def load_df(path,estep=None,dtype = '.txt',
@@ -251,7 +269,7 @@ def accum_duplicate_times(df_hist,dt_multiplier = 8,
                                         spin_av = 14.37126):
     # inputs pandas df, accumulates counts in redundant time bins,
     # calculates dt
-    
+
     df_acc = df_hist.copy()
 
     # define parameter to calculate individual bin exposure time
